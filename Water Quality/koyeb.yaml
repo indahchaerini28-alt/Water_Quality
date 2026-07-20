@@ -1,0 +1,15 @@
+name: water-quality-dashboard
+services:
+  - name: web
+    source:
+      docker:
+        dockerfile: Dockerfile
+    ports:
+      - port: 8080
+        protocol: http
+    env:
+      - key: PORT
+        value: "8080"
+      - key: FIREBASE_DATABASE_URL
+        value: "https://water-quality-dashboard-b6ac0-default-rtdb.asia-southeast1.firebasedatabase.app"
+      # FIREBASE_SERVICE_ACCOUNT should be set in the Koyeb console as a Secret

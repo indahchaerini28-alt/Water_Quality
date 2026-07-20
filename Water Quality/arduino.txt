@@ -1,0 +1,400 @@
+#include <WiFi.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+#include <time.h>
+
+// ================= PIN CONFIG =================
+#define FILTER_PIN 4
+#define PUMP_PIN   5
+#define RXD2       27
+
+// ================= NETWORK =================
+const char* WIFI_SSID = "Modal bah eh";
+const char* WIFI_PASS = "windahhh123";
+
+const char* WS_HOST = "frequent-freddie-saadykt-5fab8005.koyeb.app";
+const int WS_PORT = 443;
+
+WebSocketsClient webSocket;
+
+bool wsConnected = false;
+
+char serialBuf[256];
+int bufIdx = 0;
+
+unsigned long bootTime;
+
+// ================= RELAY SAFE =================
+void safeRelayOff() {
+  digitalWrite(FILTER_PIN, HIGH);
+  digitalWrite(PUMP_PIN, HIGH);
+}
+
+// ================= TIMESTAMP =================
+String getTimestamp() {
+  struct tm timeinfo;
+
+  if (!getLocalTime(&timeinfo)) {
+    return "2025-01-01 00:00:00";
+  }
+
+  char buffer[30];
+
+  strftime(
+    buffer,
+    sizeof(buffer),
+    "%Y-%m-%d %H:%M:%S",
+    &timeinfo
+  );
+
+  return String(buffer);
+}
+
+// ================= WEBSOCKET EVENT =================
+void webSocketEvent(
+  WStype_t type,
+  uint8_t *payload,
+  size_t length
+) {
+
+  switch (type) {
+
+    case WStype_CONNECTED:
+      wsConnected = true;
+      Serial.println("[✅] WS Connected");
+      break;
+
+    case WStype_DISCONNECTED:
+      wsConnected = false;
+      Serial.println("[❌] WS Disconnected");
+      break;
+    
+    case WStype_ERROR:
+
+    Serial.println("[❌] WS ERROR");
+
+    break;
+
+    case WStype_TEXT:
+{
+  Serial.print("[WS RX] ");
+  Serial.println((char*)payload);
+
+  StaticJsonDocument<200> doc;
+
+  DeserializationError err =
+      deserializeJson(doc, payload);
+
+  if (err) {
+    Serial.println("[WS] Invalid JSON");
+    break;
+  }
+
+  String type = doc["type"];
+
+  if (type == "control") {
+
+    String command = doc["command"];
+
+    // FILTER ON
+    if (command == "filter_on") {
+
+      digitalWrite(FILTER_PIN, LOW);
+
+      webSocket.sendTXT(
+        "{\"type\":\"ack\",\"message\":\"Filter ON\"}"
+      );
+
+      Serial.println("[CONTROL] FILTER ON");
+    }
+
+    // FILTER OFF
+    else if (command == "filter_off") {
+
+      digitalWrite(FILTER_PIN, HIGH);
+
+      webSocket.sendTXT(
+        "{\"type\":\"ack\",\"message\":\"Filter OFF\"}"
+      );
+
+      Serial.println("[CONTROL] FILTER OFF");
+    }
+
+    // POMPA ON
+    else if (command == "pump_on") {
+
+      digitalWrite(PUMP_PIN, LOW);
+
+      webSocket.sendTXT(
+        "{\"type\":\"ack\",\"message\":\"Pompa ON\"}"
+      );
+
+      Serial.println("[CONTROL] POMPA ON");
+    }
+
+    // POMPA OFF
+    else if (command == "pump_off") {
+
+      digitalWrite(PUMP_PIN, HIGH);
+
+      webSocket.sendTXT(
+        "{\"type\":\"ack\",\"message\":\"Pompa OFF\"}"
+      );
+
+      Serial.println("[CONTROL] POMPA OFF");
+    }
+  }
+
+  break;
+}
+
+    default:
+      break;
+  }
+}
+
+// ================= SETUP =================
+void setup() {
+
+  Serial.begin(115200);
+
+  pinMode(FILTER_PIN, OUTPUT);
+  pinMode(PUMP_PIN, OUTPUT);
+
+  safeRelayOff();
+
+  delay(1500);
+
+  bootTime = millis();
+
+  // Serial dari Leonardo
+  Serial2.begin(
+    115200,
+    SERIAL_8N1,
+    RXD2,
+    -1
+  );
+
+  // WiFi
+  WiFi.begin(
+    WIFI_SSID,
+    WIFI_PASS
+  );
+
+  Serial.print("Connecting WiFi");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.print("[✅] WiFi Connected : ");
+  Serial.println(WiFi.localIP());
+
+  // NTP
+  configTime(
+    7 * 3600,
+    0,
+    "pool.ntp.org"
+  );
+
+  struct tm timeinfo;
+
+  while (!getLocalTime(&timeinfo)) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("[✅] NTP Ready");
+
+  Serial.println("Connecting WS...");
+Serial.println(WS_HOST);
+
+  // WebSocket (Secure WSS for Koyeb)
+  webSocket.beginSSL(
+    WS_HOST,
+    WS_PORT,
+    "/"
+  );
+
+  webSocket.onEvent(webSocketEvent);
+
+  webSocket.setReconnectInterval(3000);
+
+  // heartbeat
+webSocket.enableHeartbeat(
+  15000,
+  3000,
+  2
+);
+
+  Serial.println("[✅] ESP32 READY");
+}
+
+// ================= LOOP =================
+void loop() {
+
+  webSocket.loop();
+
+  if (millis() - bootTime < 3000) {
+    safeRelayOff();
+    return;
+  }
+
+  while (Serial2.available()) {
+
+    char c = Serial2.read();
+    Serial.write(c);
+
+    if (c == '\n' || c == '\r') {
+
+      if (bufIdx > 0) {
+
+        serialBuf[bufIdx] = '\0';
+
+        processAndSend();
+
+        bufIdx = 0;
+      }
+    }
+    else if (bufIdx < sizeof(serialBuf) - 1) {
+
+      serialBuf[bufIdx++] = c;
+    }
+  }
+}
+
+// ================= PROCESS DATA =================
+void processAndSend() {
+
+  StaticJsonDocument<256> doc;
+
+  DeserializationError err =
+    deserializeJson(doc, serialBuf);
+
+  if (err) {
+
+    Serial.print("[⚠️] JSON Error: ");
+    Serial.println(err.c_str());
+
+    return;
+  }
+
+  float ph = doc["pH"];
+  float turb = doc["Turbidity"];
+  float sal = doc["Salinity"];
+
+  Serial.print("Turbidity = ");
+  Serial.println(turb);
+
+  // ================= KATEGORI PH =================
+
+  String phCategory;
+
+  if (ph < 6.5) {
+    phCategory = "Asam";
+  }
+  else if (ph <= 8.5) {
+    phCategory = "Normal";
+  }
+  else {
+    phCategory = "Basa";
+  }
+
+  // ================= KATEGORI KEKERUHAN =================
+
+  String turbCategory;
+
+  if (turb <= 5) {
+    turbCategory = "Jernih";
+  }
+  else {
+  turbCategory = "Keruh";
+}
+
+  // ================= KATEGORI SALINITAS =================
+
+  String salCategory;
+
+  if (sal < 0.5) {
+    salCategory = "Tawar";
+  }
+  else if (sal < 30) {
+    salCategory = "Payau";
+  }
+  else {
+    salCategory = "Asin";
+    
+  }
+
+  // ================= STATUS AIR =================
+
+String status;
+
+// Kondisi terbaik
+if (
+    ph >= 6.5 &&
+    ph <= 8.5 &&
+    turb <= 5 &&
+    sal < 0.5
+   ) {
+
+  status = "Layak";
+}
+
+// Kondisi sangat buruk
+else if (
+    ph < 5.5 ||
+    ph > 9.5 ||
+    turb > 25 ||
+    sal >= 0.5
+) {
+
+  status = "Tidak Layak";
+}
+
+// Kondisi sedang
+else {
+
+  status = "Perlu Perhatian";
+}
+
+  // ================= JSON OUTPUT =================
+
+  StaticJsonDocument<512> out;
+
+  out["timestamp"] = getTimestamp();
+
+  out["ph"] = ph;
+  out["turbidity"] = turb;
+  out["salinity"] = sal;
+
+  out["status"] = status;
+
+  out["ph_category"] = phCategory;
+  out["turbidity_category"] = turbCategory;
+  out["salinity_category"] = salCategory;
+
+  String json;
+
+  serializeJson(out, json);
+
+  Serial.println("========== DATA ==========");
+  Serial.println(json);
+  Serial.println("==========================");
+
+  // ================= SEND WS =================
+
+  if (wsConnected) {
+
+    webSocket.sendTXT(json);
+
+    Serial.println("[✅] Sent to WebSocket");
+  }
+  else {
+
+    Serial.println("[❌] WebSocket Not Connected");
+  }
+}

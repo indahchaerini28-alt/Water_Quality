@@ -1,0 +1,76 @@
+=========================================================
+PANDUAN KONEKSI IOT KE SERVER KOYEB
+=========================================================
+
+Berikut adalah panduan untuk menghubungkan perangkat IoT (ESP32/Arduino) Anda ke server yang sudah di-deploy.
+
+1. DETAIL SERVER
+----------------
+URL Dashboard : https://frequent-freddie-saadykt-5fab8005.koyeb.app/
+Host WebSocket : frequent-freddie-saadykt-5fab8005.koyeb.app
+Protokol      : WSS (Secure WebSocket)
+Port          : 443
+
+2. CONTOH KODE ESP32 (Arduino IDE)
+----------------------------------
+Gunakan library "WebSockets" oleh Markus Sattler.
+
+```cpp
+#include <WiFi.h>
+#include <WebSocketsClient.h>
+
+WebSocketsClient webSocket;
+
+void setup() {
+    Serial.begin(115200);
+    
+    // Koneksi WiFi
+    WiFi.begin("NAMA_WIFI", "PASSWORD_WIFI");
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+
+    // Konfigurasi WebSocket ke Koyeb
+    // Parameter: Host, Port, Path
+    webSocket.beginSSL("frequent-freddie-saadykt-5fab8005.koyeb.app", 443, "/");
+    
+    // Set reconnect interval jika terputus
+    webSocket.setReconnectInterval(5000);
+}
+
+void loop() {
+    webSocket.loop();
+    
+    // Contoh mengirim data setiap 10 detik
+    static unsigned long lastMsg = 0;
+    if (millis() - lastMsg > 10000) {
+        lastMsg = millis();
+        
+        // Format JSON sesuai kebutuhan server.js
+        String jsonPayload = "{\"ph\": 7.2, \"turbidity\": 15.0, \"salinity\": 0.05}";
+        webSocket.sendTXT(jsonPayload);
+    }
+}
+```
+
+3. FORMAT DATA (JSON)
+---------------------
+Server mengharapkan data dalam format JSON sebagai berikut:
+{
+  "ph": float,
+  "turbidity": float,
+  "salinity": float,
+  "status": string (opsional)
+}
+
+4. CARA VERIFIKASI
+------------------
+1. Buka link dashboard di browser.
+2. Pastikan indikator "WebSocket" di dashboard berwarna hijau/bertuliskan "Connected".
+3. Nyalakan perangkat IoT Anda.
+4. Perhatikan grafik di dashboard, data akan muncul secara real-time setiap kali IoT mengirim data.
+
+=========================================================
+Dibuat oleh Asisten Kode Trae
+=========================================================
