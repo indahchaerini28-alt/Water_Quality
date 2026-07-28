@@ -203,10 +203,21 @@ ws.on('message',async(message)=>{
 
 try{
 
-const data =
-JSON.parse(
-message.toString().trim()
-);
+const data = JSON.parse(message.toString().trim());
+
+console.log("====================================");
+console.log("📥 DATA DITERIMA DARI ESP32");
+console.log("====================================");
+console.log("Timestamp           :", data.timestamp);
+console.log("Timestamp (ms)      :", data.timestamp_ms);
+console.log("pH                  :", data.ph);
+console.log("Kategori pH         :", data.ph_category);
+console.log("Turbidity (NTU)     :", data.turbidity);
+console.log("Kategori Turbidity  :", data.turbidity_category);
+console.log("TDS (PPM)           :", data.tds);
+console.log("Kategori TDS        :", data.tds_category);
+console.log("Status Air          :", data.status);
+console.log("====================================");
 
 // =========================
 // DELAY
